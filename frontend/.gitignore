@@ -1,0 +1,3 @@
+node_modules/
+backend/hrms.db
+.DS_Store
