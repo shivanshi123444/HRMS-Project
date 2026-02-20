@@ -1,141 +1,171 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Pie } from 'react-chartjs-2';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend, Title } from 'chart.js';
+import toast, { Toaster } from 'react-hot-toast';
+import { UserPlus, Search, Download, CheckCircle, XCircle } from 'lucide-react';
+import Papa from 'papaparse';
 
-// Register Chart.js components
-ChartJS.register(ArcElement, Tooltip, Legend);
+ChartJS.register(ArcElement, Tooltip, Legend, Title);
 
-// Set your Backend URL here
 const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
 function App() {
   const [employees, setEmployees] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [newRole, setNewRole] = useState("Developer");
+  const [roleFilter, setRoleFilter] = useState("All");
+  const [formData, setFormData] = useState({ name: '', email: '', role: 'Developer' });
 
-  // Load data from Backend
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     try {
-      const empRes = await axios.get(`${API_BASE}/employees`);
-      const attRes = await axios.get(`${API_BASE}/attendance`);
+      const [empRes, attRes] = await Promise.all([
+        axios.get(`${API_BASE}/employees`),
+        axios.get(`${API_BASE}/attendance`)
+      ]);
       setEmployees(empRes.data);
       setAttendance(attRes.data);
     } catch (err) {
-      console.error("Error fetching data:", err);
+      toast.error("Cloud Connection Failed");
     }
   };
 
-  const addEmployee = async () => {
-    if (!newName || !newEmail) return alert("Please fill details");
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (!formData.name || !formData.email) return toast.error("Please fill all fields");
     try {
-      await axios.post(`${API_BASE}/employees`, { name: newName, email: newEmail, role: newRole });
-      setNewName("");
-      setNewEmail("");
+      await axios.post(`${API_BASE}/employees`, formData);
+      toast.success(`${formData.name} added to payroll`);
+      setFormData({ name: '', email: '', role: 'Developer' });
       fetchData();
-    } catch (err) {
-      console.error("Error adding employee:", err);
-    }
+    } catch (err) { toast.error("Submission Failed"); }
   };
 
-  const markAttendance = async (empId, status) => {
+  const handleAttendance = async (empId, status) => {
     try {
       await axios.post(`${API_BASE}/attendance`, { employee_id: empId, status });
-      fetchData(); 
-    } catch (err) {
-      console.error("Error marking attendance:", err);
-    }
+      toast.success(`Marked as ${status}`, { icon: status === 'Present' ? '✅' : '❌' });
+      fetchData();
+    } catch (err) { toast.error("Log failed"); }
   };
 
-  const filteredEmployees = employees.filter(emp =>
-    emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    emp.role.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Advanced Filtering Logic
+  const filteredList = useMemo(() => {
+    return employees.filter(emp => {
+      const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesRole = roleFilter === "All" || emp.role === roleFilter;
+      return matchesSearch && matchesRole;
+    });
+  }, [employees, searchTerm, roleFilter]);
 
-  const chartData = {
-    labels: ['Present', 'Absent'],
-    datasets: [
-      {
-        data: [
-          attendance.filter(a => a.status === 'Present').length,
-          attendance.filter(a => a.status === 'Absent').length
-        ],
-        backgroundColor: ['#4CAF50', '#F44336'],
-        hoverOffset: 4,
-      },
-    ],
+  // Export Data to Excel/CSV
+  const exportData = () => {
+    const csv = Papa.unparse(attendance);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", "HRMS_Attendance_Report.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Report Downloaded");
   };
 
   return (
-    <div className="App" style={{ padding: '20px', fontFamily: 'Arial' }}>
-      <h1 style={{ textAlign: 'center' }}>HRMS Professional Dashboard</h1>
+    <div style={{ backgroundColor: '#f0f2f5', minHeight: '100vh', padding: '20px', fontFamily: 'Inter, sans-serif' }}>
+      <Toaster position="top-right" />
+      
+      <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+          <div>
+            <h1 style={{ margin: 0, color: '#1a73e8' }}>HRMS Pro <span style={{fontSize: '0.5em', verticalAlign: 'middle', opacity: 0.6}}>v2.0</span></h1>
+            <p style={{ color: '#5f6368' }}>Real-time Workforce Management</p>
+          </div>
+          <button onClick={exportData} style={btnSecondary}><Download size={18} /> Export Report</button>
+        </header>
 
-      {/* Analytics Section */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '40px' }}>
-        <div style={{ width: '300px', textAlign: 'center', background: '#f9f9f9', padding: '20px', borderRadius: '15px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)' }}>
-          <h3>Today's Stats</h3>
-          <Pie data={chartData} />
+        <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '25px' }}>
+          {/* Dashboard Panel */}
+          <aside style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={cardStyle}>
+              <h3 style={cardTitle}>Attendance Analytics</h3>
+              <Pie data={{
+                labels: ['Present', 'Absent'],
+                datasets: [{
+                  data: [attendance.filter(a => a.status === 'Present').length, attendance.filter(a => a.status === 'Absent').length],
+                  backgroundColor: ['#34a853', '#ea4335']
+                }]
+              }} />
+            </div>
+
+            <div style={cardStyle}>
+              <h3 style={cardTitle}><UserPlus size={18} /> New Hire Onboarding</h3>
+              <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <input style={inputStyle} placeholder="Full Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                <input style={inputStyle} placeholder="Email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+                <select style={inputStyle} value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
+                  <option>Developer</option><option>Designer</option><option>Manager</option>
+                </select>
+                <button type="submit" style={btnPrimary}>Enroll Employee</button>
+              </form>
+            </div>
+          </aside>
+
+          {/* Table Panel */}
+          <main style={cardStyle}>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+              <div style={{ flex: 2, position: 'relative' }}>
+                <Search size={16} style={{ position: 'absolute', left: '10px', top: '12px', color: '#999' }} />
+                <input style={{ ...inputStyle, paddingLeft: '35px', width: '100%' }} placeholder="Search database..." onChange={e => setSearchTerm(e.target.value)} />
+              </div>
+              <select style={{ flex: 1, ...inputStyle }} onChange={e => setRoleFilter(e.target.value)}>
+                <option value="All">All Departments</option>
+                <option value="Developer">Engineering</option>
+                <option value="Designer">Creative</option>
+                <option value="Manager">Management</option>
+              </select>
+            </div>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '2px solid #eee', color: '#666', fontSize: '12px' }}>
+                  <th style={{ padding: '12px' }}>EMPLOYEE</th>
+                  <th style={{ padding: '12px' }}>DEPARTMENT</th>
+                  <th style={{ padding: '12px' }}>DAILY LOG</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredList.map(emp => (
+                  <tr key={emp.id} style={{ borderBottom: '1px solid #f9f9f9' }}>
+                    <td style={{ padding: '12px' }}>
+                      <div style={{ fontWeight: '600' }}>{emp.name}</div>
+                      <div style={{ fontSize: '12px', color: '#888' }}>{emp.email}</div>
+                    </td>
+                    <td style={{ padding: '12px' }}><span style={badgeStyle}>{emp.role}</span></td>
+                    <td style={{ padding: '12px' }}>
+                      <button onClick={() => handleAttendance(emp.id, 'Present')} style={btnAction}><CheckCircle size={16} color="#34a853" /></button>
+                      <button onClick={() => handleAttendance(emp.id, 'Absent')} style={btnAction}><XCircle size={16} color="#ea4335" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </main>
         </div>
       </div>
-
-      <hr />
-
-      {/* Registration Section */}
-      <div style={{ margin: '20px 0', textAlign: 'center' }}>
-        <h3>Add New Employee</h3>
-        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name" style={{ margin: '5px', padding: '8px' }} />
-        <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Email" style={{ margin: '5px', padding: '8px' }} />
-        <select value={newRole} onChange={(e) => setNewRole(e.target.value)} style={{ margin: '5px', padding: '8px' }}>
-          <option value="Developer">Developer</option>
-          <option value="Designer">Designer</option>
-          <option value="Manager">Manager</option>
-        </select>
-        <button onClick={addEmployee} style={{ backgroundColor: '#007bff', color: 'white', border: 'none', padding: '8px 20px', cursor: 'pointer', borderRadius: '4px' }}>Add Employee</button>
-      </div>
-
-      {/* Search Bar */}
-      <div style={{ margin: '20px 0' }}>
-        <input 
-          type="text" 
-          placeholder="🔍 Search by name or role..." 
-          style={{ width: '100%', padding: '12px', borderRadius: '5px', border: '1px solid #ddd', boxSizing: 'border-box' }}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </div>
-
-      {/* Employee Table */}
-      <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', marginTop: '20px' }}>
-        <thead style={{ backgroundColor: '#f2f2f2' }}>
-          <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredEmployees.map(emp => (
-            <tr key={emp.id}>
-              <td>{emp.name}</td>
-              <td>{emp.email}</td>
-              <td>{emp.role}</td>
-              <td>
-                <button onClick={() => markAttendance(emp.id, 'Present')} style={{ backgroundColor: '#d4edda', color: '#155724', marginRight: '8px', cursor: 'pointer', border: '1px solid #c3e6cb', padding: '5px 10px' }}>Present</button>
-                <button onClick={() => markAttendance(emp.id, 'Absent')} style={{ backgroundColor: '#f8d7da', color: '#721c24', cursor: 'pointer', border: '1px solid #f5c6cb', padding: '5px 10px' }}>Absent</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
+
+// Advanced Styles
+const cardStyle = { background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' };
+const cardTitle = { fontSize: '16px', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px', color: '#1a1f36' };
+const inputStyle = { padding: '10px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', outline: 'none' };
+const btnPrimary = { background: '#1a73e8', color: '#fff', border: 'none', padding: '12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' };
+const btnSecondary = { background: '#fff', border: '1px solid #ddd', padding: '8px 15px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' };
+const btnAction = { background: 'none', border: 'none', cursor: 'pointer', marginRight: '10px' };
+const badgeStyle = { background: '#f1f3f4', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' };
 
 export default App;
